@@ -308,6 +308,285 @@ describe('codec', () => {
     });
   });
 
+  describe('Interval', () => {
+    it('should create an Interval instance with correct properties', () => {
+      const interval = new codec.Interval(1, 2, BigInt(3));
+      assert.equal(interval.getMonths(), 1);
+      assert.equal(interval.getDays(), 2);
+      assert.equal(interval.getNanoseconds(), BigInt(3));
+    });
+
+    it('should calculate getAsNanoseconds correctly', () => {
+      const interval = new codec.Interval(1, 2, BigInt(3));
+      const expectedNanos =
+        BigInt(1 * 30 * 24 * 3600 * 1000000000) +
+        BigInt(2 * 24 * 3600 * 1000000000) +
+        BigInt(3);
+      assert.equal(interval.getAsNanoseconds(), expectedNanos);
+    });
+
+    describe('fromISO8601', () => {
+      it('should parse valid ISO8601 strings correctly', () => {
+        const testCases = [
+          {
+            input: 'P1Y2M3DT12H12M6.78912345S',
+            expected: new codec.Interval(14, 3, BigInt('43926789123450')),
+          },
+          {input: 'P1Y', expected: new codec.Interval(12, 0, BigInt(0))},
+          {input: 'P1M', expected: new codec.Interval(1, 0, BigInt(0))},
+          {input: 'P1D', expected: new codec.Interval(0, 1, BigInt(0))},
+          {
+            input: 'PT1H',
+            expected: new codec.Interval(0, 0, BigInt(3600000000000)),
+          },
+          {
+            input: 'PT1M',
+            expected: new codec.Interval(0, 0, BigInt(60000000000)),
+          },
+          {
+            input: 'PT1S',
+            expected: new codec.Interval(0, 0, BigInt(1000000000)),
+          },
+          {
+            input: 'PT0.1S',
+            expected: new codec.Interval(0, 0, BigInt(100000000)),
+          },
+          {
+            input: 'P1Y2M3DT12H12M6S',
+            expected: new codec.Interval(14, 3, BigInt('43926000000000')),
+          },
+          {
+            input: 'P-1Y2M3DT12H12M6S',
+            expected: new codec.Interval(-10, 3, BigInt('43926000000000')),
+          },
+          {
+            input: 'P2Y-5M10DT100H-40M15.123S',
+            expected: new codec.Interval(19, 10, BigInt('357615123000000')),
+          },
+          {
+            input: 'P-2Y5M-10DT-100H40M-15.123S',
+            expected: new codec.Interval(-19, -10, BigInt('-357615123000000')),
+          },
+          {
+            input: 'P-1M2DT3H14M5.678S',
+            expected: new codec.Interval(-1, 2, BigInt('11645678000000')),
+          },
+          {
+            input: 'P1M-2DT-3H-14M-5.678S',
+            expected: new codec.Interval(1, -2, BigInt('-11645678000000')),
+          },
+          {
+            input: 'PT-1H2M3.456S',
+            expected: new codec.Interval(0, 0, BigInt('-3476544000000')),
+          },
+          {
+            input: 'PT1H-2M-3.456S',
+            expected: new codec.Interval(0, 0, BigInt('3476544000000')),
+          },
+          {
+            input: 'PT0.123456789S',
+            expected: new codec.Interval(0, 0, BigInt('123456789')),
+          },
+          {
+            input: 'PT1.999999999S',
+            expected: new codec.Interval(0, 0, BigInt('1999999999')),
+          },
+          {
+            input: 'P1DT1H2M3.123456789S',
+            expected: new codec.Interval(0, 1, BigInt('3723123456789')),
+          },
+          {
+            input: 'P-1DT-1H-2M-3.123456789S',
+            expected: new codec.Interval(0, -1, BigInt('-3723123456789')),
+          },
+        ];
+
+        testCases.forEach(({input, expected}) => {
+          assert.deepStrictEqual(codec.Interval.fromISO8601(input), expected);
+        });
+      });
+
+      it('should throw error for invalid ISO8601 strings', () => {
+        const invalidStrings = [
+          'P',
+          'PT',
+          'P1YM',
+          'P1Y2M3D4H5M6S', // Missing T
+          'P1Y2M3DT4H5M6.S', // Missing decimal value
+          'invalid',
+          'P1Y2M3DT4H5M6.789', // Missing S
+          'P1Y2M3DT4H5M6.789SS', // Extra S
+          'P1Y2M3DT4H5M6.', // Missing value after decimal point
+          'P1Y2M3DT4H5M6.ABC', // Non-digit characters after decimal point
+          'P1Y2M3DT', // Missing time components
+          'P-T1H', // Invalid negative sign position
+          'PT1H-', // Invalid negative sign position
+        ];
+
+        invalidStrings.forEach(str => {
+          assert.throws(
+            () => {
+              codec.Interval.fromISO8601(str);
+            },
+            new RegExp('Invalid ISO8601 duration string'),
+            `Expected exception on parsing ${str}`
+          );
+        });
+      });
+
+      it('should throw error when months is not a safe integer', () => {
+        // Assuming Number.MAX_SAFE_INTEGER / 12 is the max safe years
+        const maxSafeYears = Math.ceil(Number.MAX_SAFE_INTEGER / 12);
+        const invalidISOString = `P${maxSafeYears}Y4M`;
+        assert.throws(() => {
+          codec.Interval.fromISO8601(invalidISOString);
+        }, new RegExp('Total months is outside of the range of safe integer'));
+      });
+    });
+
+    describe('toISO8601', () => {
+      it('should convert Interval to valid ISO8601 strings', () => {
+        const testCases = [
+          {input: new codec.Interval(0, 0, BigInt(0)), expected: 'P0Y'},
+          {
+            input: new codec.Interval(14, 3, BigInt('43926789000000')),
+            expected: 'P1Y2M3DT12H12M6.789S',
+          },
+          {input: new codec.Interval(12, 0, BigInt(0)), expected: 'P1Y'},
+          {input: new codec.Interval(1, 0, BigInt(0)), expected: 'P1M'},
+          {input: new codec.Interval(0, 1, BigInt(0)), expected: 'P1D'},
+          {
+            input: new codec.Interval(0, 0, BigInt(3600000000000)),
+            expected: 'PT1H',
+          },
+          {
+            input: new codec.Interval(0, 0, BigInt(60000000000)),
+            expected: 'PT1M',
+          },
+          {
+            input: new codec.Interval(0, 0, BigInt(1000000000)),
+            expected: 'PT1S',
+          },
+          {
+            input: new codec.Interval(0, 0, BigInt(100000000)),
+            expected: 'PT0.1S',
+          },
+          {input: new codec.Interval(0, 0, BigInt(0)), expected: 'P0Y'},
+          {
+            input: new codec.Interval(-10, 3, BigInt('43926789700000')),
+            expected: 'P-10M3DT12H12M6.7897S',
+          },
+          {
+            input: new codec.Interval(25, 15, BigInt('86399123456789')),
+            expected: 'P2Y1M15DT23H59M59.123456789S',
+          },
+          {
+            input: new codec.Interval(-25, -15, BigInt('-86399123456789')),
+            expected: 'P-2Y-1M-15DT-23H-59M-59.123456789S',
+          },
+          {input: new codec.Interval(13, 0, BigInt('0')), expected: 'P1Y1M'},
+          {
+            input: new codec.Interval(0, 0, BigInt('86400000000000')),
+            expected: 'PT24H',
+          },
+          {input: new codec.Interval(0, 31, BigInt('0')), expected: 'P31D'},
+          {input: new codec.Interval(-12, 0, BigInt('0')), expected: 'P-1Y'},
+        ];
+
+        testCases.forEach(({input, expected}) => {
+          assert.equal(input.toISO8601(), expected);
+        });
+      });
+    });
+
+    it('should check equality correctly', () => {
+      const interval1 = new codec.Interval(1, 2, BigInt(3));
+      const interval2 = new codec.Interval(1, 2, BigInt(3));
+      const interval3 = new codec.Interval(-4, -5, BigInt(-6)); // Negative values
+
+      // Test with identical intervals
+      assert.equal(interval1.equals(interval2), true);
+      assert.equal(interval2.equals(interval1), true);
+
+      // Test with different intervals
+      assert.equal(interval1.equals(interval3), false);
+      assert.equal(interval3.equals(interval1), false);
+
+      // Test with different values for each field (including negative)
+      assert.equal(
+        interval1.equals(new codec.Interval(1, 2, BigInt(-4))),
+        false
+      );
+      assert.equal(
+        interval1.equals(new codec.Interval(1, -3, BigInt(3))),
+        false
+      );
+      assert.equal(
+        interval1.equals(new codec.Interval(-2, 2, BigInt(3))),
+        false
+      );
+      assert.equal(
+        interval3.equals(new codec.Interval(-4, -5, BigInt(6))),
+        false
+      );
+      assert.equal(
+        interval3.equals(new codec.Interval(-4, 5, BigInt(-6))),
+        false
+      );
+      assert.equal(
+        interval3.equals(new codec.Interval(4, -5, BigInt(-6))),
+        false
+      );
+
+      // Test with null and undefined
+      assert.equal(interval1.equals(null), false);
+      assert.equal(interval1.equals(undefined), false);
+
+      // Test with an object that is not an Interval
+      assert.equal(interval1.equals({} as any), false);
+    });
+
+    it('should return the correct value with valueOf()', () => {
+      const interval = new codec.Interval(1, 2, BigInt(3));
+      assert.equal(interval.valueOf(), interval);
+    });
+
+    it('should return the correct JSON representation', () => {
+      const interval = new codec.Interval(1, 2, BigInt(3));
+      const expectedJson = interval.toISO8601();
+      assert.equal(interval.toJSON(), expectedJson);
+    });
+
+    describe('ISO8601 roundtrip', () => {
+      it('should convert Interval to ISO8601 and back without losing data', () => {
+        const testCases = [
+          new codec.Interval(14, 3, BigInt('43926789000000')),
+          new codec.Interval(12, 0, BigInt(0)),
+          new codec.Interval(1, 0, BigInt(0)),
+          new codec.Interval(0, 1, BigInt(0)),
+          new codec.Interval(0, 0, BigInt(3600000000000)),
+          new codec.Interval(0, 0, BigInt(60000000000)),
+          new codec.Interval(0, 0, BigInt(1000000000)),
+          new codec.Interval(0, 0, BigInt(100000000)),
+          new codec.Interval(0, 0, BigInt(0)),
+          new codec.Interval(-10, 3, BigInt('43926000000000')),
+          new codec.Interval(25, 15, BigInt('86399123456789')),
+          new codec.Interval(-25, -15, BigInt('-86399123456789')),
+          new codec.Interval(13, 0, BigInt('0')),
+          new codec.Interval(0, 0, BigInt('86400000000000')),
+          new codec.Interval(0, 31, BigInt('0')),
+          new codec.Interval(-12, 0, BigInt('0')),
+        ];
+
+        testCases.forEach(interval => {
+          const isoString = interval.toISO8601();
+          const roundtripInterval = codec.Interval.fromISO8601(isoString);
+          assert.deepStrictEqual(roundtripInterval, interval);
+        });
+      });
+    });
+  });
+
   describe('ProtoMessage', () => {
     const protoMessageParams = {
       value: music.SingerInfo.create({
@@ -826,6 +1105,16 @@ describe('codec', () => {
       assert.deepStrictEqual(decoded, expected);
     });
 
+    it('should decode INTERVAL', () => {
+      const value = 'P1Y2M-45DT67H12M6.789045638S';
+      const decoded = codec.decode(value, {
+        code: google.spanner.v1.TypeCode.INTERVAL,
+      });
+
+      assert(decoded instanceof codec.Interval);
+      assert.strictEqual(decoded.value, value);
+    });
+
     it('should decode ARRAY and inner members', () => {
       const value = ['1'];
 
@@ -1054,6 +1343,12 @@ describe('codec', () => {
       assert.strictEqual(encoded, value.toJSON());
     });
 
+    it('should encode INTERVAL', () => {
+      const value = new codec.Interval(17, -20, BigInt(30001));
+      const encoded = codec.encode(value);
+      assert.strictEqual(encoded, 'P1Y5M-20DT0.000030001S');
+    });
+
     it('should encode INT64', () => {
       const value = new codec.Int(10);
 
@@ -1214,6 +1509,15 @@ describe('codec', () => {
       assert.deepStrictEqual(codec.getType(new Date()), {type: 'timestamp'});
     });
 
+    it.skip('should determine if the value is a interval', () => {
+      assert.deepStrictEqual(
+        codec.getType(new codec.Interval(1, 2, BigInt(3))),
+        {
+          type: 'interval',
+        }
+      );
+    });
+
     it('should determine if the value is a struct', () => {
       const struct = codec.Struct.fromJSON({a: 'b'});
       const type = codec.getType(struct);
@@ -1342,6 +1646,9 @@ describe('codec', () => {
         },
         bytes: {
           code: google.spanner.v1.TypeCode[google.spanner.v1.TypeCode.BYTES],
+        },
+        interval: {
+          code: google.spanner.v1.TypeCode[google.spanner.v1.TypeCode.INTERVAL],
         },
         array: {
           code: google.spanner.v1.TypeCode[google.spanner.v1.TypeCode.ARRAY],
